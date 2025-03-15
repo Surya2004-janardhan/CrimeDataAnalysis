@@ -1,42 +1,33 @@
-# Load necessary libraries (install if not installed)
+# Load necessary libraries
 library(shiny)
 library(ggplot2)
 library(dplyr)
 library(lubridate)
-library(leaflet)
+library(DT)
+library(data.table)
+library(shinycssloaders)
+# Load the dataset (handle errors)
+crime_data <- tryCatch({
+  fread("crime.csv", stringsAsFactors = FALSE)
+}, error = function(e) {
+  showNotification("Error loading crime dataset!", type = "error")
+  return(NULL)
+})
 
-# Load the dataset
-crime_data <- read.csv("crime.csv", stringsAsFactors = FALSE)
+# Ensure data is valid
+if (!is.null(crime_data) && "Date" %in% colnames(crime_data)) {
+  crime_data$Date <- as.Date(crime_data$Date, format="%d-%m-%Y")
+} else {
+  crime_data <- NULL
+}
 
-# Convert Date column to Date format (adjust format if needed)
-crime_data$Date <- as.Date(crime_data$Date, format="%d-%m-%Y")
-
-# View dataset structure
-str(crime_data)
-
-# Filter for 2023 data
-crime_2023 <- crime_data %>% filter(year(Date) == 2023)
-
-# Remove rows with missing location data for mapping
-crime_2023 <- crime_2023 %>% filter(!is.na(Longitude) & !is.na(Latitude))
-
-# Monthly crime count
-monthly_crimes <- crime_2023 %>%
-  mutate(Month = floor_date(Date, "month")) %>%
-  group_by(Month) %>%
-  summarise(Total_Crimes = n())
-
-# Arrest distribution data
-arrest_dist <- crime_2023 %>%
-  group_by(Arrest) %>%
-  summarise(Total = n())
-
-# Crime type count (top 10)
-crime_types <- crime_2023 %>%
-  group_by(Primary.Type) %>%
-  summarise(Total = n()) %>%
-  arrange(desc(Total)) %>%
-  head(10)
+# Filter for 2023 data (handle missing Date column)
+if (!is.null(crime_data)) {
+  crime_2023 <- crime_data %>% filter(year(Date) == 2023)
+  crime_2023 <- crime_2023 %>% filter(!is.na(Longitude) & !is.na(Latitude))
+} else {
+  crime_2023 <- NULL
+}
 
 # UI
 ui <- fluidPage(
@@ -44,40 +35,56 @@ ui <- fluidPage(
   
   sidebarLayout(
     sidebarPanel(
-      dateRangeInput("dateRange", "Select Date Range:",
-                     start = min(crime_data$Date, na.rm = TRUE),
-                     end = max(crime_data$Date, na.rm = TRUE)),
+      # Dynamic Date Range
+      uiOutput("dateRangeUI"),
+      
+      # Crime Type Filter
       selectInput("crimeType", "Select Crime Type:", 
-                  choices = c("ALL", unique(crime_data$Primary.Type)), 
+                  choices = c("ALL", if (!is.null(crime_2023)) unique(crime_2023$Primary.Type)), 
                   selected = "ALL", multiple = TRUE),
+      
+      # Location Filter
       selectInput("location", "Select Location:", 
-                  choices = c("ALL", unique(crime_data$Location.Description)), 
+                  choices = c("ALL", if (!is.null(crime_2023)) unique(crime_2023$Location.Description)), 
                   selected = "ALL", multiple = TRUE),
+      
+      # Visualization Selection
       checkboxGroupInput("visualizations", "Choose Visualizations to Display:",
                          choices = list("Monthly Crimes" = "monthly", 
                                         "Top Crime Types" = "top",
-                                        "Crime Map" = "map",
                                         "Arrest Distribution" = "arrest"),
                          selected = c("monthly", "top", "map", "arrest")),
-      actionButton("update", "Update View")
+      
+      actionButton("update", "Update View", class = "btn-primary")
     ),
     
     mainPanel(
       tabsetPanel(
-        tabPanel("Monthly Crimes", plotOutput("monthlyCrimesPlot")),
-        tabPanel("Top Crime Types", plotOutput("topCrimeTypesPlot")),
-        tabPanel("Crime Map", leafletOutput("crimeMap")),
-        tabPanel("Arrest Distribution", plotOutput("arrestDistPlot"))
+        tabPanel("Monthly Crimes", withSpinner(plotOutput("monthlyCrimesPlot"))),
+        tabPanel("Top Crime Types", withSpinner(plotOutput("topCrimeTypesPlot"))),
+        tabPanel("Arrest Distribution", withSpinner(plotOutput("arrestDistPlot"))),
+        tabPanel("Data Table", DTOutput("dataTable"))
       )
     )
   )
 )
 
 # Server logic
-server <- function(input, output) {
-  # Reactive filter function
+server <- function(input, output, session) {
+  # Dynamic Date Range Input
+  output$dateRangeUI <- renderUI({
+    if (is.null(crime_2023)) return(NULL)
+    
+    dateRangeInput("dateRange", "Select Date Range:",
+                   start = min(crime_2023$Date, na.rm = TRUE),
+                   end = max(crime_2023$Date, na.rm = TRUE))
+  })
+  
+  # Reactive Filtered Data
   filtered_data <- reactive({
-    data <- crime_2023 %>% 
+    if (is.null(crime_2023)) return(NULL)
+    
+    data <- crime_2023 %>%
       filter(Date >= input$dateRange[1] & Date <= input$dateRange[2])
     
     if (!("ALL" %in% input$crimeType)) {
@@ -88,12 +95,12 @@ server <- function(input, output) {
       data <- data %>% filter(Location.Description %in% input$location)
     }
     
-    data
+    return(data)
   })
   
   # Monthly Crimes Plot
   output$monthlyCrimesPlot <- renderPlot({
-    if (!"monthly" %in% input$visualizations) return(NULL)
+    if (!"monthly" %in% input$visualizations || is.null(filtered_data())) return(NULL)
     
     monthly_data <- filtered_data() %>%
       mutate(Month = floor_date(Date, "month")) %>%
@@ -101,15 +108,15 @@ server <- function(input, output) {
       summarise(Total_Crimes = n())
     
     ggplot(monthly_data, aes(x = Month, y = Total_Crimes)) +
-      geom_line(color = "blue") +
-      geom_point(color = "red") +
+      geom_line(color = "blue", size = 1.2) +
+      geom_point(color = "red", size = 3) +
       labs(title = "Total Crimes per Month in 2023", x = "Month", y = "Total Crimes") +
       theme_minimal()
   })
   
-  # Top Crime Types
+  # Top Crime Types Plot
   output$topCrimeTypesPlot <- renderPlot({
-    if (!"top" %in% input$visualizations) return(NULL)
+    if (!"top" %in% input$visualizations || is.null(filtered_data())) return(NULL)
     
     crime_data_filtered <- filtered_data() %>%
       group_by(Primary.Type) %>%
@@ -124,27 +131,14 @@ server <- function(input, output) {
       theme_minimal()
   })
   
-  # Crime Map
-  output$crimeMap <- renderLeaflet({
-    if (!"map" %in% input$visualizations) return(NULL)
-    
-    leaflet(filtered_data()) %>%
-      addTiles() %>%
-      addCircleMarkers(~Longitude, ~Latitude,
-                       popup = ~paste0("<b>Type:</b> ", Primary.Type, 
-                                       "<br><b>Date:</b> ", Date, 
-                                       "<br><b>Location:</b> ", Location.Description),
-                       radius = 3, color = "red", fillOpacity = 0.7)
-  })
-  
   # Arrest Distribution Plot
   output$arrestDistPlot <- renderPlot({
-    if (!"arrest" %in% input$visualizations) return(NULL)
+    if (!"arrest" %in% input$visualizations || is.null(filtered_data())) return(NULL)
     
     arrest_data <- filtered_data() %>%
       group_by(Arrest) %>%
       summarise(Total = n()) %>%
-      filter(!is.na(Arrest)) # Remove NA values
+      filter(!is.na(Arrest))
     
     ggplot(arrest_data, aes(x = "", y = Total, fill = factor(Arrest))) +
       geom_bar(stat = "identity", width = 1) +
@@ -153,9 +147,13 @@ server <- function(input, output) {
       theme_void() +
       scale_fill_manual(values = c("TRUE" = "blue", "FALSE" = "red"))
   })
+  
+  # Data Table Output
+  output$dataTable <- renderDT({
+    if (is.null(filtered_data())) return(NULL)
+    datatable(filtered_data(), options = list(pageLength = 10))
+  })
 }
 
 # Run the app
 shinyApp(ui, server)
-
-#rsconnect::setAccountInfo(name='suryar', token='4278DD5E27F58D59EAB79B3934468994', secret='5pGexwjrENieic/7/3loyC9Ee0AKv4SCGrMJ8aTf')
