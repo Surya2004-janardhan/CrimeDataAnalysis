@@ -68,7 +68,8 @@ deployApp()
 This project is licensed under the MIT License.
 
 ## 👤 Author
-- **Your Name** (Replace with your actual name and contact details)
+- **Surya Janardhan**
+- **chintalajanardhan2004@gmail.com** 
 
 ## 🎯 Future Improvements
 - Add crime severity ranking
