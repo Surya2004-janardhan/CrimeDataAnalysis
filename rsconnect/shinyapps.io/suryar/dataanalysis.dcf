@@ -1,0 +1,13 @@
+name: dataanalysis
+title: dataanalysis
+username: suryar
+account: suryar
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 14244169
+bundleId: 9942605
+url: https://suryar.shinyapps.io/dataanalysis/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: cri.r|crimedataana.r
