@@ -157,5 +157,3 @@ server <- function(input, output) {
 
 # Run the app
 shinyApp(ui, server)
-
-#rsconnect::setAccountInfo(name='suryar', token='4278DD5E27F58D59EAB79B3934468994', secret='5pGexwjrENieic/7/3loyC9Ee0AKv4SCGrMJ8aTf')
